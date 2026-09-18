@@ -1,0 +1,7 @@
+# conformance: invalid — AC102 the suffix matches two objects
+# expect: objects=5 relations=1 placements=0
+# expect: diagnostics=AC102:warning@7
+system x { service db }
+system y { service db }
+service a
+a writes db

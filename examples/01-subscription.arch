@@ -1,0 +1,53 @@
+# Insurance subscriptions — one small system, C1 → C2 → C3 on one page.
+# A good first read: three levels, verbs with protocols, a broker, a topic.
+
+actor    customer  "Customer"        description "buys and manages subscriptions in the app"
+actor    ops       "Operations"      description "watches renewals and failed payments"
+
+external gov_id    "GovID"           description "national identity provider"
+external bank_gw   "Bank gateway"    tech REST
+external push      "APNs / FCM"
+
+system subs "Subscription platform" owner @team-subs {
+
+  app     mobile   "Mobile app"      tech "Kotlin · Swift · React Native"
+  webapp  web      "Web renderer"    tech "Next.js"
+  gateway api_gw   "API Gateway"     tech Kong { transit  auth oidc }
+  service iam      "Customer IAM"    tech Keycloak
+
+  service subscriptions "Subscription service" tech "Spring Boot" {
+    description "lifecycle of a subscription: trial, active, paused, cancelled"
+    component api        "REST controllers"     tech "Spring Web"
+    component lifecycle  "Lifecycle rules"      tech "Spring Service"
+    component repo       "Repositories"         tech "Spring Data JDBC"
+    api calls lifecycle
+    lifecycle calls repo
+  }
+  service billing  "Billing"         tech "Spring Boot"
+  service adapters "Product adapters" tech "Spring Boot" description "one adapter per product system"
+  broker  rabbit   "RabbitMQ"        { transit }
+  datastore subs_db "Subscriptions DB" tech "PostgreSQL 16" owned_by subscriptions pii true retention 5y
+  datastore bill_db "Billing DB"       tech "PostgreSQL 16" owned_by billing
+}
+
+external product_a "Motor product system"    tech 1C
+external product_b "Health product system"   tech 1C
+
+customer calls subs.mobile
+customer calls subs.web  over HTTPS
+subs.mobile calls subs.subscriptions over HTTPS via subs.api_gw "manage subscriptions"
+subs.web    calls subs.subscriptions over HTTPS via subs.api_gw
+subs.mobile calls subs.iam over OIDC "login"
+subs.iam    calls gov_id  over OIDC "federation"
+subs.subscriptions writes subs.subs_db over SQL
+subs.billing       writes subs.bill_db over SQL
+subs.billing       calls  bank_gw over HTTPS "charge · refund"
+subs.subscriptions publishes subscription.changed
+subs.billing       publishes payment.failed
+subs.adapters      calls product_a over SOAP
+subs.adapters      calls product_b over REST
+subs.subscriptions calls push over HTTPS "renewal reminders"
+ops calls subs.web
+
+topic subscription.changed { via subs.rabbit  publisher subs.subscriptions  subscriber subs.billing, subs.adapters }
+topic payment.failed       { via subs.rabbit  publisher subs.billing        subscriber subs.subscriptions }

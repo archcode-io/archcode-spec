@@ -1,0 +1,34 @@
+name: ci
+on:
+  push:
+    branches: [main]
+  pull_request:
+jobs:
+  check:
+    # the examples must parse cleanly with the current engine, and the text must have no dangling marks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm i --no-save @archcode-io/engine
+      - name: conformance suite
+        run: node conformance/run.mjs
+      - name: examples parse and round-trip
+        run: |
+          node --input-type=module -e "
+            import { readFileSync, readdirSync } from 'node:fs';
+            import { parse, roundTrips } from '@archcode-io/engine';
+            let bad = 0;
+            for (const f of readdirSync('examples').filter(f => f.endsWith('.arch'))) {
+              const src = readFileSync('examples/' + f, 'utf8');
+              const errs = parse(src).diagnostics.filter(d => d.severity === 'error');
+              if (errs.length) { console.log(f, errs[0].line + ':' + errs[0].col, errs[0].message); bad++; }
+              if (!roundTrips(src)) { console.log(f, 'does not round-trip'); bad++; }
+            }
+            process.exit(bad ? 1 : 0);
+          "
+      - name: marks in the spec are the known ones
+        run: |
+          ! grep -noE '\{\{[^}]*\}\}' spec.md | grep -vE '\{\{(reserved v[0-9.]+|partial|soon|draft|v[0-9.]+)\}\}'

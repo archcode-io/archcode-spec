@@ -1,0 +1,12 @@
+# conformance: valid — §3.3 lists, pairs, flags, quoted values, units
+# expect: objects=1 relations=0 placements=0
+# expect: diagnostics=none
+service api "API" {
+  tech Go 1.22
+  tags payments, core, "needs review"
+  owner @team-payments
+  criticality high
+  transit
+  replicas 3
+  retention 30d
+}

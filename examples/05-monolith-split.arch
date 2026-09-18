@@ -1,0 +1,75 @@
+# Splitting an accounting monolith — the reserves module leaves the core.
+# Components inside a 1C-style system, data volumes that grow, physical servers
+# with start and target disk, and one model for the transit and the target state.
+
+actor accountant "Accountant"
+actor actuary    "Actuary"        description "runs the reserve calculation monthly"
+
+external regulator "Regulator reporting"
+external mdm       "Master data (MDM)" tech 1C
+
+system core "Accounting core" tech 1C owner @team-core {
+  service app "Core application" tech "1C 8.3" {
+    component policies   "Policy accounting"
+    component claims     "Claims"
+    component ledger     "General ledger"
+    component reinsurance "Reinsurance"
+    component reserves   "Reserve calculation" { phase transit }
+    policies calls ledger
+    claims   calls ledger
+    reserves reads policies { phase transit }
+    reserves reads claims   { phase transit }
+  }
+  datastore db "Core DB" tech "MS SQL" owned_by app {
+    capacity size 28Ti growth 800Gi/mo
+    at 2026-12 capacity size 7Ti
+  }
+}
+
+system reserves_sys "Reserves" tech 1C owner @team-actuary {
+  phase target
+  service app "Reserves application" tech "1C 8.3" {
+    component detail    "Detailed register records"
+    component aggregate "Aggregated registers"
+    component reporting "Reserve reports"
+    detail calls aggregate
+    aggregate calls reporting
+  }
+  datastore db "Reserves DB" tech "MS SQL" owned_by app {
+    capacity size 5Ti growth 400Gi/mo
+  }
+}
+
+accountant calls core.app
+actuary    calls core.app  { phase transit }
+actuary    calls reserves_sys.app { phase target }
+core.app   writes core.db over SQL
+core.app   calls mdm over HTTPS "reference data"
+core.app   calls regulator over SFTP "monthly reports"
+reserves_sys.app reads  core.db over DBLINK "policies · claims snapshot" { phase target }
+reserves_sys.app writes reserves_sys.db over SQL { phase target }
+reserves_sys.app calls regulator over SFTP "reserve reports" { phase target }
+
+env prod "PROD" {
+  dc dc1
+  node sql_core "DB server · core" cpu 128 mem 1024Gi {
+    disk data 28Ti
+    run core.db
+    at 2026-12 disk data 15Ti
+  }
+  node app_core "App servers · core" count 2 cpu 32 mem 256Gi disk 500Gi { run core.app }
+  node sql_res "DB server · reserves" cpu 64 mem 512Gi {
+    phase target
+    disk data 5Ti
+    run reserves_sys.db
+    at 2026-12 disk data 15Ti
+  }
+  node app_res "App server · reserves" cpu 16 mem 128Gi disk 300Gi {
+    phase target
+    run reserves_sys.app
+  }
+}
+env stage "STAGE" {
+  node sql "DB server" cpu 32 mem 256Gi disk 8Ti { run core.db, reserves_sys.db }
+  node app "App server" cpu 16 mem 64Gi disk 300Gi { run core.app, reserves_sys.app }
+}

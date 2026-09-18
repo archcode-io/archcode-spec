@@ -1,0 +1,5 @@
+# conformance: invalid — AC109 an actor cannot run anywhere
+# expect: objects=3 relations=0 placements=1
+# expect: diagnostics=AC109:warning@5
+actor buyer "Buyer"
+env prod { node n1 { run buyer } }

@@ -1,0 +1,9 @@
+# conformance: valid — §5.2 transit nodes are passed through, not called
+# expect: objects=4 relations=2 placements=0
+# expect: diagnostics=none
+gateway gw "Gateway" { transit tech Kong }
+broker mq "Broker" { transit }
+service a "A"
+service b "B"
+a calls b via gw
+a publishes b via mq

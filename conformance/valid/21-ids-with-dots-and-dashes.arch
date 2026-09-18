@@ -1,0 +1,8 @@
+# conformance: valid — §10 identifiers: letters, digits, `_`, `-`, `.` inside
+# expect: objects=3 relations=2 placements=0
+# expect: diagnostics=none
+service order-api "Order API"
+service order_worker "Order worker"
+topic order.placed
+order-api publishes order.placed
+order_worker subscribes order.placed

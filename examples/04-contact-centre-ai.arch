@@ -1,0 +1,73 @@
+# Contact-centre AI assistant — voice and text bots in front of the operators.
+# Non-functional keys (availability, criticality, RTO/RPO), GPU clusters,
+# HA in one data centre now, HA + DR in two later — the second DC is a phase.
+
+actor caller   "Caller"            description "phones the contact centre"
+actor chatter  "Chat customer"     description "writes in the app or on the site"
+actor operator "Operator"
+
+external telco     "Telecom operator"     tech SIP
+external chat_platform "Chat platform"    tech "Edna"  description "omnichannel chat"
+external crm       "CRM"                  owner @team-crm
+external bss       "Billing / BSS"
+
+system cc "AI assistant" owner @team-cc availability 24x7 criticality business_critical rto 5m rpo 1h {
+  service sbc       "SIP border controller" tech Kamailio
+  service pbx       "PBX"                   tech Asterisk
+  service voice_bot "Voice bot"             tech Python  cpu 2 mem 4Gi
+  service text_bot  "Text bot"              tech Python  cpu 1 mem 2Gi
+  service orchestrator "Dialogue orchestrator" tech "Python · Flowise" cpu 2 mem 4Gi
+  service asr       "Speech recognition"    tech Whisper  gpu 1 cpu 8 mem 32Gi
+  service tts       "Speech synthesis"      tech Silero   gpu 1 cpu 4 mem 16Gi
+  service llm       "LLM"                   tech vLLM     gpu 2 cpu 8 mem 64Gi
+  gateway gw        "API Gateway"           tech nginx { transit }
+  cache   redis     "Dialogue state"        tech Redis
+  datastore pg      "Dialogues DB"          tech "PostgreSQL 16" owned_by orchestrator pii true retention 3y
+  datastore s3      "Recordings"            tech MinIO  pii true retention 1y
+  capacity calls 20000/day  sessions 300  concurrent_calls 120
+}
+
+caller  calls telco over PSTN
+telco   calls cc.sbc over SIP port 5060
+cc.sbc  calls cc.pbx over SIP
+cc.pbx  calls cc.voice_bot over "Audio socket"
+chatter calls chat_platform over HTTPS
+chat_platform calls cc.text_bot over HTTPS via cc.gw "webhook"
+cc.voice_bot calls cc.asr over gRPC
+cc.voice_bot calls cc.tts over gRPC
+cc.voice_bot calls cc.orchestrator over HTTPS
+cc.text_bot  calls cc.orchestrator over HTTPS
+cc.orchestrator calls cc.llm over HTTPS
+cc.orchestrator reads  cc.redis over TCP
+cc.orchestrator writes cc.pg over SQL
+cc.orchestrator calls crm over HTTPS "customer card · ticket"
+cc.orchestrator calls bss over HTTPS "balance · tariff"
+cc.pbx calls operator over SIP "transfer to a human"
+cc.pbx writes cc.s3 over "S3 API" "call recordings"
+
+env dc1 "PROD · DC1" {
+  dc dc1
+  cluster ai "AI cluster" nodes 3 cpu 12 mem 64Gi disk 120Gi gpu 1 {
+    run cc.asr replicas 2
+    run cc.tts replicas 2
+    run cc.llm replicas 1
+  }
+  cluster app "App cluster" nodes 3 cpu 8 mem 16Gi disk 60Gi {
+    run cc.voice_bot replicas 3 cpu 1/2 mem 2Gi/4Gi
+    run cc.text_bot  replicas 2 cpu 0.5/1 mem 1Gi/2Gi
+    run cc.orchestrator replicas 3 cpu 1/2 mem 2Gi/4Gi
+    run cc.gw replicas 2
+  }
+  node telephony "Telephony VMs" count 2 cpu 4 mem 8Gi disk 60Gi { run cc.sbc, cc.pbx }
+  node db "DB cluster" count 3 cpu 8 mem 16Gi disk 300Gi { run cc.pg, cc.redis }
+  node store "Recordings store" cpu 4 mem 8Gi disk 4Ti { run cc.s3 }
+}
+
+env dc2 "PROD · DC2 (DR)" {
+  phase target
+  dc dc2
+  cluster ai "AI cluster" nodes 3 cpu 12 mem 64Gi disk 120Gi gpu 1 { run cc.asr, cc.tts, cc.llm }
+  cluster app "App cluster" nodes 3 cpu 8 mem 16Gi disk 60Gi { run cc.voice_bot, cc.text_bot, cc.orchestrator, cc.gw }
+  node telephony "Telephony VMs" count 2 cpu 4 mem 8Gi disk 60Gi { run cc.sbc, cc.pbx }
+  node db "DB replica" count 3 cpu 8 mem 16Gi disk 300Gi { run cc.pg }
+}

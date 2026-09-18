@@ -1,0 +1,8 @@
+# conformance: valid — §4.4 owned_by pulls a store under its service
+# expect: objects=3 relations=2 placements=0
+# expect: diagnostics=none
+service api "API"
+datastore db "DB" owned_by api
+cache c "Cache" owned_by api
+api writes db
+api reads c

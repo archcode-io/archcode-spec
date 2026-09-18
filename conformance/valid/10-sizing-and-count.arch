@@ -1,0 +1,9 @@
+# conformance: valid — §6.2 sizing on the run statement
+# expect: objects=3 relations=0 placements=1
+# expect: diagnostics=none
+service api "API"
+env prod "Production" {
+  node app "App VMs" count 2 cpu 4 mem 8Gi disk 100Gi {
+    run api count 3 cpu 0.5 mem 512Mi
+  }
+}

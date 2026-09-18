@@ -1,0 +1,88 @@
+# Product platform — constructor, premium calculation, contracts, AI document intake.
+# The infrastructure page done cleanly: VLAN, Redis ×3, RabbitMQ ×3, three OKD nodes,
+# HAProxy in front of Patroni, and resources per environment at start and in a year.
+
+actor underwriter "Underwriter"
+actor agent       "Agent"
+actor client      "Client"
+
+external gov_id   "GovID"
+external pay_gw   "Online payment"     owner @team-pay
+external ocr_ext  "External OCR"       description "fallback for rare document types"
+system  policy_core "Policy Core"      tech 1C owner @team-core scope internal
+system  client_profile "Unified Client Profile" owner @team-cdi scope internal
+system  print_forms "Print form builder" owner @team-docs scope internal
+
+system pp "Product platform" owner @team-products {
+  webapp  ui_uw     "Underwriter workplace"  tech React
+  webapp  ui_agent  "Agent workplace"        tech React
+  webapp  ui_client "Client web"             tech React
+  gateway gw_dmz    "API Gateway DMZ"        tech "Nginx + OpenResty" { transit }
+  gateway gw_local  "API Gateway local"      tech "Nginx + OpenResty" { transit }
+  service iam       "Keycloak"               tech Keycloak
+  service constructor "Product constructor"  tech Java  cpu 1 mem 2Gi
+  service pricing   "Premium calculation"    tech Java  cpu 2 mem 4Gi  capacity rps 300 p99 250ms
+  service contracts "Contracts"              tech Java  cpu 2 mem 4Gi
+  service intake    "Document intake"        tech Python cpu 2 mem 4Gi
+  service ocr_llm   "OCR + LLM"              tech Python gpu 1 cpu 8 mem 32Gi
+  job     recalc    "Premium recalculation"  tech Python description "nightly"
+  broker  bus       "Event bus"              tech RabbitMQ { transit }
+  cache   redis     "Cache"                  tech Redis
+  datastore pg      "Platform DB"            tech "PostgreSQL 16" owned_by contracts pii true retention 5y
+  datastore vectors "Vector DB"              tech Qdrant  owned_by ocr_llm
+  datastore s3      "Documents"              tech MinIO   owned_by intake  pii true
+}
+
+underwriter calls pp.ui_uw     over HTTPS
+agent       calls pp.ui_agent  over HTTPS
+client      calls pp.ui_client over HTTPS
+pp.ui_uw     calls pp.constructor over HTTPS via pp.gw_local "REST API [JSON/HTTPS]"
+pp.ui_uw     calls pp.contracts   over HTTPS via pp.gw_local
+pp.ui_agent  calls pp.pricing     over HTTPS via pp.gw_local "quote"
+pp.ui_client calls pp.contracts   over HTTPS via pp.gw_dmz, pp.gw_local
+pp.ui_client calls pp.iam         over OIDC  "login"
+pp.iam       calls gov_id         over OIDC  "federation"
+pp.pricing   reads  pp.redis      over TCP   "tariff cache"
+pp.contracts writes pp.pg         over SQL
+pp.contracts calls  client_profile over HTTPS "client card"
+pp.contracts calls  print_forms   over HTTPS "policy PDF"
+pp.contracts calls  pay_gw        over HTTPS "payment link"
+pp.contracts publishes contract.issued
+pp.intake    writes pp.s3         over "S3 API"
+pp.intake    calls  pp.ocr_llm    over HTTPS "extract fields"
+pp.ocr_llm   writes pp.vectors    over gRPC
+pp.ocr_llm   calls  ocr_ext       over HTTPS "fallback"
+pp.recalc    reads  pp.pg         over SQL
+pp.recalc    calls  pp.pricing    over HTTPS
+policy_core  subscribes contract.issued
+
+topic contract.issued { via pp.bus  publisher pp.contracts  subscriber policy_core, pp.intake }
+
+env prod "PROD" {
+  dc dc1  vlan 3070
+  segment dmz "DMZ" { data forbidden
+    node edge "Edge" count 2 cpu 4 mem 8Gi disk 40Gi { run pp.gw_dmz, pp.ui_client } }
+  segment lan "LAN" { data allowed
+    cluster okd "OKD" nodes 3 cpu 8 mem 16Gi disk 30Gi {
+      run pp.constructor replicas 2 cpu 0.5/1 mem 1Gi/2Gi
+      run pp.pricing     replicas 3 cpu 1/2   mem 2Gi/4Gi
+      run pp.contracts   replicas 3 cpu 1/2   mem 2Gi/4Gi
+      run pp.intake      replicas 2 cpu 1/2   mem 2Gi/4Gi
+      run pp.recalc, pp.iam, pp.gw_local, pp.ui_uw, pp.ui_agent
+      at 2027-01 nodes 6
+    }
+    node ai "AI node" cpu 16 mem 64Gi disk 200Gi gpu 1 { run pp.ocr_llm, pp.vectors }
+    node redis "Redis" count 3 cpu 2 mem 4Gi disk 20Gi { run pp.redis }
+    node mq "RabbitMQ" count 3 cpu 2 mem 4Gi disk 40Gi { run pp.bus }
+    node lb "HAProxy" count 2 cpu 2 mem 2Gi disk 20Gi
+    node db "PostgreSQL + Patroni" count 3 cpu 8 mem 16Gi {
+      disk system 30Gi data 150Gi
+      run pp.pg
+      at 2027-01 cpu 16 mem 32Gi disk system 30Gi data 600Gi
+    }
+    node s3 "MinIO" cpu 4 mem 8Gi disk 1Ti { run pp.s3  at 2027-01 disk 4Ti }
+  }
+}
+env stage "STAGE" { node all "Stage" count 3 cpu 4 mem 8Gi disk 100Gi { run pp.contracts, pp.pricing, pp.pg, pp.redis, pp.bus } }
+env test  "TEST"  { node all "Test"  count 2 cpu 4 mem 8Gi disk 80Gi  { run pp.contracts, pp.pricing, pp.pg } }
+env dev   "DEV"   { node all "Dev"   count 1 cpu 4 mem 8Gi disk 80Gi  { run pp.contracts, pp.pg } }

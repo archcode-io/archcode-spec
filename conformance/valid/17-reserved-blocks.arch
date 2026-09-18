@@ -1,0 +1,14 @@
+# conformance: valid — §7 §8 §16 reserved kinds are kept, not read
+# expect: objects=4 relations=0 placements=0
+# expect: diagnostics=AC103:info@5,AC103:info@9,AC103:info@12
+service pay "Payments"
+decision d1 "Use Kafka" {
+  status accepted
+  date 2026-03-01
+}
+rule no_direct_db {
+  forbid writes pay from * except pay
+}
+board roadmap "Roadmap" {
+  column now { pay }
+}

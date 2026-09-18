@@ -1,0 +1,7 @@
+# conformance: valid — §2 the smallest useful document
+# expect: objects=2 relations=1 placements=0
+# expect: diagnostics=none
+service   checkout   "Checkout"      tech Go
+datastore orders_db  "Orders DB"     tech PostgreSQL 16
+
+checkout writes orders_db over SQL

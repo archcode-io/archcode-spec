@@ -1,0 +1,18 @@
+# conformance: valid — §5 every relation verb
+# expect: objects=5 relations=10 placements=0
+# expect: diagnostics=none
+service a "A"
+service b "B"
+datastore d "D"
+broker mq "MQ"
+topic t "T"
+a calls b
+a reads d
+a writes d
+a uses b
+a streams b
+a depends_on b
+a publishes t
+b subscribes t
+a emits t
+b listens t

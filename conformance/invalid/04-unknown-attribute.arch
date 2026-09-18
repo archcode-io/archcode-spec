@@ -1,0 +1,4 @@
+# conformance: invalid — AC104 unknown attribute key (information)
+# expect: objects=1 relations=0 placements=0
+# expect: diagnostics=AC104:info@4
+service a "A" colour blue

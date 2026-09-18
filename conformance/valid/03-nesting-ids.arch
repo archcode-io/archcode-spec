@@ -1,0 +1,14 @@
+# conformance: valid — §4.2 nested blocks give full ids
+# expect: objects=6 relations=3 placements=0
+# expect: diagnostics=none
+system orders "Orders" {
+  service api    "API"
+  service worker "Worker"
+  datastore db   "DB"
+  api writes db
+  worker reads db
+}
+system billing "Billing" {
+  service api "API"
+}
+orders.api calls billing.api over HTTPS

@@ -1,0 +1,8 @@
+# conformance: valid — §6.4 phase on objects and relations
+# expect: objects=3 relations=2 placements=0
+# expect: diagnostics=none
+service mono "Monolith" phase now
+service orders "Orders" phase target
+datastore db "DB"
+mono writes db { phase now }
+orders writes db { phase target }

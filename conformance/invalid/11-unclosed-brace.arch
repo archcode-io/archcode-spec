@@ -1,0 +1,6 @@
+# conformance: invalid — AC003 unclosed `{`
+# expect: objects=3 relations=0 placements=0
+# expect: diagnostics=AC003:error@7
+system s "S" {
+  service a "A"
+service b "B"

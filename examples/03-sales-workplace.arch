@@ -1,0 +1,82 @@
+# Sales workplace — the full chain: C1 → C2 → C3 → virtual machines.
+# Corporate system codes, named message flows, IAM federation, an LLM agent on a GPU host,
+# hosts with agents, ports on the edges a firewall request asks for.
+
+actor sales    "Sales manager"
+actor support  "Support"
+actor backoff  "Contract back office"
+
+external exchange "Corporate mail"       tech "MS Exchange"  code CR-MS-Exchange
+external ad       "Corporate AD"         tech "Microsoft AD" code CR-AD
+external nexus    "Artifact registry"    tech Nexus          code CR-Nexus
+external numbering "Policy numbering"    owner @team-mdm     code CR-Numbering
+external mdm      "Master data (MDM)"    tech 1C             code CR-MDM
+
+system erm "Sales workplace (ERM)" owner @team-corp-sales code CH-ERM {
+  webapp  ui        "ERM UI"          tech React          code UI-ERM
+  gateway gw        "API Gateway"     tech Traefik        code API-GW  { transit }
+  service iam       "Internal IAM"    tech Keycloak       code IAM-KC
+  service contracts "Contracts API"   tech "Java · Spring Boot" code API-Contracts cpu 2 mem 4Gi {
+    description "contract requests, status model, documents"
+    component controllers "REST controllers"       tech "Spring Web"
+    component services    "Domain services"        tech "Spring Service"
+    component repos       "Repositories"           tech "Spring Data JDBC"
+    component mapper      "DTO mappers"            tech MapStruct
+    component events      "Event publisher"        tech "Spring AMQP"
+    controllers calls mapper
+    controllers calls services
+    services    calls repos
+    services    calls events
+  }
+  service notifier "Email notifier"   tech Python  code SVC-Notifier
+  service files    "Files processor"  tech Python  code SVC-Files
+  service llm_agent "LLM agent"       tech "Python · n8n" code AGNT-LLM  description "extracts entities from medical-centre files"
+  service ollama   "LLM server"       tech Ollama  gpu 1
+  broker  rabbit   "Message broker"   tech RabbitMQ  code BRK-Rabbit { transit }
+  datastore db     "Contracts store"  tech "PostgreSQL 16" owned_by contracts code DB-Contracts pii true
+  datastore s3     "Object store"     tech MinIO  code STO-S3
+}
+
+sales   calls erm.ui over HTTPS
+support calls erm.ui over HTTPS
+backoff calls erm.ui over HTTPS
+erm.ui  calls erm.contracts over HTTPS via erm.gw "REST"
+erm.ui  calls erm.iam over OAuth2 "login"
+erm.iam calls ad over LDAP "identity federation" port 636
+erm.contracts writes erm.db over SQL port 5432
+erm.contracts writes erm.s3 over "S3 API" port 9000
+erm.contracts calls numbering over HTTPS "unique policy number"
+erm.contracts subscribes mdm.changed
+erm.contracts publishes contract.status
+erm.contracts publishes contract.documents
+erm.notifier  subscribes contract.status
+erm.notifier  calls exchange over SMTP port 25
+erm.files     subscribes contract.documents
+erm.files     writes erm.s3 over "S3 API"
+erm.files     calls erm.llm_agent over HTTPS
+erm.llm_agent calls erm.ollama over HTTPS port 11434
+erm.contracts calls nexus over HTTPS port 9001 "artifacts" { phase transit }
+
+topic contract.status    { via erm.rabbit  publisher erm.contracts  subscriber erm.notifier }
+topic contract.documents { via erm.rabbit  publisher erm.contracts  subscriber erm.files }
+topic mdm.changed        { via erm.rabbit  publisher mdm            subscriber erm.contracts }
+
+env prod "PROD" {
+  dc dc1  vlan 3076
+  segment lan "Corporate LAN" {
+    data allowed
+    node edge "Edge VMs" count 2 cpu 8 mem 8Gi disk 30Gi {
+      run erm.gw
+      agent antivirus, grafana_alloy, keepalived, haproxy
+    }
+    node app "Application VMs" count 2 cpu 12 mem 16Gi disk 300Gi {
+      run erm.ui, erm.contracts, erm.notifier, erm.files
+      agent antivirus, grafana_alloy
+    }
+    node gpu "LLM host" cpu 12 mem 24Gi disk 500Gi gpu "RTX 4090" { run erm.ollama, erm.llm_agent }
+    node mq "RabbitMQ VMs" count 3 cpu 4 mem 8Gi disk 100Gi { run erm.rabbit }
+    node db "DB VMs (Patroni + etcd)" count 3 cpu 8 mem 12Gi disk 100Gi { run erm.db }
+    node store "Storage VM" cpu 4 mem 8Gi disk 2Ti { run erm.s3  agent restic }
+    node mon "Monitoring VM" cpu 4 mem 8Gi disk 200Gi { agent loki, grafana }
+  }
+}

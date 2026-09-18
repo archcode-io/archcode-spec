@@ -1,0 +1,5 @@
+# conformance: valid — §3.2 a block may sit on one line
+# expect: objects=3 relations=0 placements=1
+# expect: diagnostics=none
+service a "A" { tech Go  tags core }
+env prod { node n1 { run a } }

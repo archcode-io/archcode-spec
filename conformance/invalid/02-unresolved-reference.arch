@@ -1,0 +1,5 @@
+# conformance: invalid — AC101 unresolved reference
+# expect: objects=1 relations=1 placements=0
+# expect: diagnostics=AC101:warning@5
+service a "A"
+a calls nobody

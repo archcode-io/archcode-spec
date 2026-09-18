@@ -1,0 +1,5 @@
+# conformance: invalid — AC105 a version this engine does not know
+# expect: objects=1 relations=0 placements=0
+# expect: diagnostics=AC105:warning@4
+archcode 9.9
+service a "A"

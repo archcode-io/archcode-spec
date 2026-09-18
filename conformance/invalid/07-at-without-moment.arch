@@ -1,0 +1,10 @@
+# conformance: invalid — AC106 `at` needs a moment
+# expect: objects=3 relations=0 placements=1
+# expect: diagnostics=AC106:error@8
+service api "API"
+env prod {
+  node n1 {
+    run api
+    at count 4
+  }
+}

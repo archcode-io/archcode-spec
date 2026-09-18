@@ -1,0 +1,8 @@
+# conformance: valid — §4.1 externals are called, never opened
+# expect: objects=3 relations=2 placements=0
+# expect: diagnostics=none
+external stripe "Stripe" { exposes http openapi://stripe.yaml }
+external smtp "SMTP relay"
+service billing "Billing"
+billing calls stripe over HTTPS
+billing uses smtp

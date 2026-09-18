@@ -1,0 +1,13 @@
+# conformance: valid — §6 env · cluster · node · managed · run
+# expect: objects=6 relations=0 placements=3
+# expect: diagnostics=none
+service api "API"
+service worker "Worker"
+datastore db "DB"
+
+env prod "Production" {
+  cluster k8s "Kubernetes" {
+    run api, worker
+  }
+  managed pg "Managed PostgreSQL" { run db }
+}

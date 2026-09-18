@@ -1,0 +1,6 @@
+# conformance: invalid — AC004 `exposes` needs an interface kind
+# expect: objects=1 relations=0 placements=0
+# expect: diagnostics=AC004:error@5
+service a "A" {
+  exposes
+}

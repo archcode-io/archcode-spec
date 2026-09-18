@@ -1,0 +1,8 @@
+# conformance: invalid — AC107 placement blocks do not call each other
+# expect: objects=3 relations=1 placements=0
+# expect: diagnostics=AC107:warning@7
+env prod {
+  node a "A"
+  node b "B"
+  a calls b
+}

@@ -1,0 +1,11 @@
+# conformance: valid — §6.3 `at <moment>` on hosts and runs
+# expect: objects=3 relations=0 placements=1
+# expect: diagnostics=none
+service api "API"
+env prod "Production" {
+  node app "App VMs" count 2 cpu 4 mem 8Gi {
+    run api
+    at 2027-01 count 4
+    at 2027-06 count 6 mem 16Gi
+  }
+}

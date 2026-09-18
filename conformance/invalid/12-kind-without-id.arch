@@ -1,0 +1,5 @@
+# conformance: invalid — AC002 a declaration needs an identifier
+# expect: objects=1 relations=0 placements=0
+# expect: diagnostics=AC002:error@4
+service "No id"
+service b "B"

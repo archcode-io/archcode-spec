@@ -1,0 +1,105 @@
+# Public site + customer cabinet of an insurer — the zone template.
+# DMZ / GRAY / LAN with a data policy, Kubernetes, a Patroni cluster,
+# resources per environment now and in a year, transit vs target phases.
+
+actor customer "Customer"           description "visits the site, logs into the cabinet"
+actor editor   "Content editor"     description "manages pages and products"
+
+external gov_id  "GovID"            description "national identity provider"
+external sms_gw  "SMS gateway"      tech REST
+external mail_gw "Mail relay"       tech SMTP
+
+# corporate systems owned by other teams, inside the perimeter
+system policy_core    "Policy Core"            tech 1C  owner @team-core   scope internal
+system client_profile "Unified Client Profile" owner @team-cdi  scope internal
+system consents       "Consent service"        owner @team-consent scope internal
+
+system portal "Corporate site & cabinet" owner @team-web {
+  webapp  site      "www — public site"    tech "React 19"
+  webapp  cabinet   "Customer cabinet"     tech "React 19"
+  webapp  cms_ui    "Content panel"        tech "React 19"
+  webapp  legacy_cms "Old CMS"             tech "PHP · Bitrix" { phase transit }
+
+  gateway gw_dmz    "API Gateway DMZ"      tech "Nginx + OpenResty" { transit }
+  gateway gw_lan    "API Gateway LAN"      tech "Nginx + OpenResty" { transit }
+  service iam_dmz   "Keycloak DMZ"         tech Keycloak
+  service iam_lan   "Keycloak LAN"         tech Keycloak
+
+  service web_api   "Site backend"         tech Java  cpu 1 mem 2Gi
+  service cabinet_api "Cabinet backend"    tech Java  cpu 2 mem 4Gi  criticality business_critical
+  service notifier  "Notifier"             tech Java  cpu 0.5 mem 1Gi
+  job     exporter  "Delta exporter"       tech Python description "pulls policy deltas from Policy Core every 15 min"
+
+  cache     redis   "Session cache"        tech Redis
+  broker    rabbit  "Event bus"            tech RabbitMQ { transit }
+  datastore pg      "Portal DB"            tech "PostgreSQL 16" owned_by cabinet_api  pii true  retention 5y
+  datastore s3      "Documents"            tech "S3 · MinIO"    owned_by cabinet_api  pii true
+}
+
+customer calls portal.site    over HTTPS
+customer calls portal.cabinet over HTTPS
+editor   calls portal.cms_ui  over HTTPS
+editor   calls portal.legacy_cms over HTTPS { phase transit }
+
+portal.site    calls portal.web_api     over HTTPS via portal.gw_dmz, portal.gw_lan "pages · products"
+portal.cabinet calls portal.cabinet_api over HTTPS via portal.gw_dmz, portal.gw_lan "policies · payments"
+portal.cabinet calls portal.iam_dmz     over OIDC  "login"
+portal.iam_dmz calls portal.iam_lan     over OIDC  "federation"
+portal.iam_lan calls gov_id             over OIDC  "identity federation"
+portal.cms_ui  calls portal.web_api     over HTTPS via portal.gw_lan
+portal.legacy_cms calls portal.site over HTTPS "renders old pages" { phase transit }
+
+portal.web_api     reads  portal.redis over TCP
+portal.cabinet_api writes portal.pg    over SQL
+portal.cabinet_api writes portal.s3    over "S3 API"
+portal.cabinet_api calls  client_profile over HTTPS "current policies"
+portal.cabinet_api calls  consents       over HTTPS "consent check"
+portal.exporter    reads  policy_core    over DBLINK "policy deltas"
+portal.exporter    writes portal.pg      over SQL
+portal.cabinet_api publishes cabinet.event
+portal.notifier    subscribes cabinet.event
+portal.notifier    calls sms_gw  over HTTPS port 443
+portal.notifier    calls mail_gw over SMTP  port 25
+
+topic cabinet.event { via portal.rabbit  publisher portal.cabinet_api  subscriber portal.notifier }
+
+# ---- where it runs ----
+env prod "PROD" {
+  dc dc1  vlan 1404
+  segment dmz "DMZ" {
+    data forbidden
+    node edge "Edge VMs" count 2 cpu 4 mem 8Gi disk 40Gi {
+      run portal.gw_dmz, portal.iam_dmz, portal.site
+      agent antivirus, grafana_alloy
+    }
+  }
+  segment gray "GRAY" {
+    data transient
+    node cache "Cache VMs" count 3 cpu 2 mem 8Gi disk 30Gi { run portal.redis }
+  }
+  segment lan "LAN" {
+    data allowed
+    cluster okd "OKD" nodes 3 cpu 8 mem 16Gi disk 60Gi {
+      run portal.web_api     replicas 2 cpu 0.5/1 mem 1Gi/2Gi
+      run portal.cabinet_api replicas 3 cpu 1/2   mem 2Gi/4Gi
+      run portal.notifier    replicas 2
+      run portal.exporter    replicas 1
+      run portal.gw_lan, portal.iam_lan
+      at 2027-01 nodes 5
+    }
+    node db "PostgreSQL + Patroni" count 3 cpu 8 mem 16Gi {
+      disk system 30Gi data 200Gi
+      run portal.pg
+      at 2027-01 disk system 30Gi data 500Gi
+    }
+    node lb "HAProxy" count 2 cpu 2 mem 4Gi disk 30Gi
+    node mq "RabbitMQ" count 3 cpu 2 mem 4Gi disk 30Gi { run portal.rabbit }
+    node s3 "MinIO" count 1 cpu 4 mem 8Gi disk 1Ti { run portal.s3 }
+  }
+}
+env stage "STAGE" {
+  node all "Stage VMs" count 3 cpu 4 mem 8Gi disk 120Gi { run portal.web_api, portal.cabinet_api, portal.pg, portal.redis }
+}
+env test "TEST" {
+  node all "Test VMs" count 2 cpu 4 mem 8Gi disk 80Gi { run portal.web_api, portal.cabinet_api, portal.pg }
+}

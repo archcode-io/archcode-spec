@@ -1,0 +1,6 @@
+# conformance: valid — the last line may lack a newline
+# expect: objects=2 relations=1 placements=0
+# expect: diagnostics=none
+service a "A"
+service b "B"
+a calls b

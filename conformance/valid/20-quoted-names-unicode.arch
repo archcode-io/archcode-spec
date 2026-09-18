@@ -1,0 +1,6 @@
+# conformance: valid — names are free strings, ids are identifiers
+# expect: objects=2 relations=1 placements=0
+# expect: diagnostics=none
+service checkout "Оформление заказа — Checkout (v2)" tech "Go 1.22 · gin"
+actor buyer "Покупатель"
+buyer calls checkout over HTTPS "покупает"

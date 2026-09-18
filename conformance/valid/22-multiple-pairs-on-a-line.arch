@@ -1,0 +1,7 @@
+# conformance: valid — §6.1 several key–value pairs on one body line
+# expect: objects=3 relations=0 placements=1
+# expect: diagnostics=none
+service api "API"
+env prod "Production" {
+  node n1 "Node 1" dc dc1 vlan 3076 ip 10.0.0.1 os "Ubuntu 22.04" { run api }
+}

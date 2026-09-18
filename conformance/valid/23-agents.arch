@@ -1,0 +1,7 @@
+# conformance: valid — §6.5 agents on a host
+# expect: objects=3 relations=0 placements=1
+# expect: diagnostics=none
+service api "API"
+env prod "Production" {
+  node app "App VMs" agent antivirus, grafana_alloy, keepalived { run api }
+}

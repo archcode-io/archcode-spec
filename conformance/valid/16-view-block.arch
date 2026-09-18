@@ -1,0 +1,15 @@
+# conformance: valid — §9 a view block with pins, routes and lens
+# expect: objects=3 relations=1 placements=0
+# expect: diagnostics=none
+service a "A"
+service b "B"
+a calls b over HTTPS "hello"
+view main "Main" {
+  lens logical
+  layout auto aspect 1.6
+  at a 0 0
+  at b 400 0
+  size b 200 90
+  route a calls b from right 0.5 to left 0.5 label 0.5 below
+  agents off
+}

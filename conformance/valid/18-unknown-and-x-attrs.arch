@@ -1,0 +1,4 @@
+# conformance: valid — §3.3 x- keys are yours; unknown keys are information
+# expect: objects=1 relations=0 placements=0
+# expect: diagnostics=none
+service api "API" x-cost-centre 4711 x-slo "99.9"

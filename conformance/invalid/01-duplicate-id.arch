@@ -1,0 +1,6 @@
+# conformance: invalid — AC100 duplicate id
+# expect: objects=2 relations=0 placements=0
+# expect: diagnostics=AC100:error@6
+service a "A"
+service b "B"
+service a "A again"
