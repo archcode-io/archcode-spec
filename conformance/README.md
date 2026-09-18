@@ -15,7 +15,7 @@ specific diagnostic: code, severity and line. Every fixture, valid or not, must
 survive `parse → serialize` byte for byte: the tree is lossless (§12.1).
 
 ```sh
-node run.mjs                                   # against @archcode-io/engine (npm i @archcode-io/engine)
+node run.mjs                                   # against @archcode-io/engine (npm i @archcode-io/engine@preview)
 node run.mjs --engine ../path/to/your/index.js # against another implementation
 node run.mjs --only invalid/ --json
 ```
